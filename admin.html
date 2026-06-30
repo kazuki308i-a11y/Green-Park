@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>医院管理画面 - 装着状況管理</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
+        .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1, h2 { border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        .form-group { margin-bottom: 20px; display: flex; gap: 10px; }
+        input[type="text"] { flex: 1; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 12px 20px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        .btn-delete { background-color: #dc3545; padding: 6px 12px; font-size: 14px; }
+        .btn-delete:hover { background-color: #c82333; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f1f3f5; }
+        .status-attach { color: #28a745; font-weight: bold; }
+        .status-detach { color: #dc3545; font-weight: bold; }
+        .no-result { color: #666; font-style: italic; padding: 10px 0; }
+        .patient-link { color: #007bff; text-decoration: underline; cursor: pointer; font-weight: bold; }
+        
+        /* 履歴モーダル（ポップアップ）のスタイル */
+        #historyModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { background: #fff; width: 90%; max-width: 600px; margin: 50px auto; padding: 20px; border-radius: 8px; max-height: 80vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 15px; }
+        .close-btn { background: #6c757d; padding: 8px 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>医院管理ダッシュボード</h1>
+        
+        <h2>1. 新規患者登録</h2>
+        <div class="form-group">
+            <input type="text" id="newName" placeholder="新規患者の氏名を入力してください（例：山田 太郎）">
+            <button onclick="registerAndPrint()">登録して印刷ページへ</button>
+        </div>
+
+        <h2>2. 患者検索・装着状況確認</h2>
+        <div class="form-group">
+            <input type="text" id="searchInput" oninput="filterPatients()" placeholder="患者名で検索">
+        </div>
+        
+        <table id="patientTable">
+            <thead>
+                <tr>
+                    <th>患者名 (クリックで履歴表示)</th>
+                    <th>最新ステータス</th>
+                    <th>最終記録日時</th>
+                    <th style="text-align: center; width: 80px;">操作</th>
+                </tr>
+            </thead>
+            <tbody id="listBody">
+                <tr><td colspan="4" class="no-result">データを読み込み中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div id="historyModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalName" style="border: none; padding: 0; margin: 0;">履歴</h2>
+                <button class="close-btn" onclick="closeModal()">閉じる</button>
+            </div>
+            <table>
+                <thead>
+                    <tr><th>アクション</th><th>記録日時</th></tr>
+                </thead>
+                <tbody id="historyBody">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+        import { getFirestore, collection, getDocs, addDoc, query, orderBy, deleteDoc, doc, where } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyA6_Wnmfgy28yfNo8E1ytbBwwTRrfL1zCs",
+            authDomain: "mouthpiece-greenpark.firebaseapp.com",
+            projectId: "mouthpiece-greenpark",
+            storageBucket: "mouthpiece-greenpark.firebasestorage.app",
+            messagingSenderId: "795688174725",
+            appId: "1:795688174725:web:a0958e30465e09e51495ec",
+            measurementId: "G-V8CC0XRT2T"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let allPatients = [];
+        let allRecords = {};
+
+        // データの初期読み込み
+        window.loadData = async () => {
+            try {
+                const patientSnap = await getDocs(collection(db, "patients"));
+                allPatients = [];
+                patientSnap.forEach(d => {
+                    allPatients.push({ id: d.id, ...d.data() });
+                });
+
+                const recordQuery = query(collection(db, "records"), orderBy("timestamp", "desc"));
+                const recordSnap = await getDocs(recordQuery);
+                
+                allRecords = {};
+                recordSnap.forEach(d => {
+                    const data = d.data();
+                    if (!allRecords[data.patientId]) {
+                        allRecords[data.patientId] = data;
+                    }
+                });
+
+                renderTable(allPatients);
+            } catch (e) {
+                console.error("データ読み込みエラー:", e);
+            }
+        };
+
+        // テーブルの描画
+        function renderTable(patientsList) {
+            const listBody = document.getElementById('listBody');
+            listBody.innerHTML = '';
+
+            if (patientsList.length === 0) {
+                listBody.innerHTML = '<tr><td colspan="4" class="no-result">一致する患者が見つかりません</td></tr>';
+                return;
+            }
+
+            patientsList.forEach(patient => {
+                const latestRecord = allRecords[patient.id];
+                let statusHtml = '<span>記録なし</span>';
+                let timeStr = '---';
+
+                if (latestRecord) {
+                    const statusClass = latestRecord.action === 'attach' ? 'status-attach' : 'status-detach';
+                    const statusText = latestRecord.action === 'attach' ? '装着中' : '外しています';
+                    statusHtml = `<span class="${statusClass}">${statusText}</span>`;
+                    timeStr = latestRecord.timestamp ? latestRecord.timestamp.toDate().toLocaleString() : "不明";
+                }
+
+                const row = `<tr>
+                    <td>
+                        <span class="patient-link" onclick="showHistory('${patient.id}', '${patient.name}')">${patient.name} 様</span>
+                    </td>
+                    <td>${statusHtml}</td>
+                    <td>${timeStr}</td>
+                    <td style="text-align: center;">
+                        <button class="btn-delete" onclick="deletePatient('${patient.id}', '${patient.name}')">削除</button>
+                    </td>
+                </tr>`;
+                listBody.insertAdjacentHTML('beforeend', row);
+            });
+        }
+
+        // 検索フィルター処理
+        window.filterPatients = () => {
+            const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
+            if (!keyword) {
+                renderTable(allPatients);
+                return;
+            }
+            const filtered = allPatients.filter(p => p.name && p.name.toLowerCase().includes(keyword));
+            renderTable(filtered);
+        };
+
+        // 新規登録と印刷ページへの遷移
+        window.registerAndPrint = async () => {
+            const nameInput = document.getElementById('newName');
+            const name = nameInput.value.trim();
+            if (!name) return alert("患者名を入力してください");
+
+            try {
+                const docRef = await addDoc(collection(db, "patients"), { name: name });
+                nameInput.value = ''; 
+                loadData(); 
+                window.open(`print.html?id=${docRef.id}`, '_blank');
+            } catch (e) {
+                alert("登録エラーが発生しました: " + e.message);
+            }
+        };
+
+        // 患者の削除処理
+        window.deletePatient = async (id, name) => {
+            if (!confirm(`${name} 様のデータを削除してもよろしいですか？\n※この操作は取り消せません。`)) {
+                return;
+            }
+            try {
+                await deleteDoc(doc(db, "patients", id));
+                alert("削除しました。");
+                loadData(); // リストを再更新
+            } catch (e) {
+                alert("削除に失敗しました: " + e.message);
+            }
+        };
+
+        // 履歴表示（ポップアップ）処理
+        window.showHistory = async (id, name) => {
+            document.getElementById('modalName').innerText = `${name} 様の履歴`;
+            document.getElementById('historyModal').style.display = 'block';
+            
+            const historyBody = document.getElementById('historyBody');
+            historyBody.innerHTML = '<tr><td colspan="2" class="no-result">読み込み中...</td></tr>';
+
+            try {
+                // 対象患者の全記録を取得
+                const q = query(collection(db, "records"), where("patientId", "==", id));
+                const snap = await getDocs(q);
+                
+                let records = [];
+                snap.forEach(d => records.push(d.data()));
+
+                // 新しい順に並び替え
+                records.sort((a, b) => {
+                    const timeA = a.timestamp ? a.timestamp.toMillis() : 0;
+                    const timeB = b.timestamp ? b.timestamp.toMillis() : 0;
+                    return timeB - timeA;
+                });
+
+                historyBody.innerHTML = '';
+                if (records.length === 0) {
+                    historyBody.innerHTML = '<tr><td colspan="2" class="no-result">記録がありません</td></tr>';
+                    return;
+                }
+
+                records.forEach(r => {
+                    const statusClass = r.action === 'attach' ? 'status-attach' : 'status-detach';
+                    const statusText = r.action === 'attach' ? '装着' : '外した';
+                    const timeStr = r.timestamp ? r.timestamp.toDate().toLocaleString() : "不明";
+                    
+                    historyBody.insertAdjacentHTML('beforeend', `<tr>
+                        <td><span class="${statusClass}">${statusText}</span></td>
+                        <td>${timeStr}</td>
+                    </tr>`);
+                });
+            } catch (e) {
+                historyBody.innerHTML = `<tr><td colspan="2" class="no-result" style="color:red;">エラー: ${e.message}</td></tr>`;
+            }
+        };
+
+        window.closeModal = () => {
+            document.getElementById('historyModal').style.display = 'none';
+        };
+
+        loadData();
+    </script>
+</body>
+</html>

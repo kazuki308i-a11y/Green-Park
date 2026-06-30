@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>初期設定用QRコード・マニュアル</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 40px; color: #333; line-height: 1.6; }
+        .print-sheet { max-width: 650px; margin: 0 auto; border: 2px dashed #ccc; padding: 40px; border-radius: 10px; background: #fff; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .patient-name { font-size: 28px; font-weight: bold; border-bottom: 2px solid #333; display: inline-block; padding: 0 20px 5px 20px; margin-bottom: 20px; }
+        .qr-zone { display: flex; justify-content: center; margin: 30px 0; }
+        #qrcode { padding: 10px; border: 1px solid #ccc; background: #fff; }
+        .manual-section { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 20px; margin-top: 30px; text-align: left; }
+        .manual-section h3 { margin-top: 0; color: #007bff; border-bottom: 1px solid #dee2e6; padding-bottom: 8px; }
+        .step-list { padding-left: 20px; }
+        .step-list li { margin-bottom: 10px; }
+        .btn-zone { text-align: center; margin-top: 30px; }
+        .print-btn { padding: 15px 35px; font-size: 18px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .print-btn:hover { background-color: #218838; }
+        
+        /* 印刷時に「印刷ボタン」を非表示にするための設定 */
+        @media print {
+            body { padding: 0; }
+            .print-sheet { border: none; padding: 0; }
+            .btn-zone { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="print-sheet">
+        <div class="header">
+            <div class="patient-name" id="pName">読み込み中...</div>
+            <p style="font-size: 18px; margin: 0;"><strong>マウスピース装着記録ページのご案内</strong></p>
+            <p style="font-size: 14px; color: #666; margin-top: 5px;">下記のQRコードをスマホで読み取って、毎日の装着・取り外しを記録してください。</p>
+        </div>
+
+        <div class="qr-zone">
+            <div id="qrcode"></div>
+        </div>
+
+        <div class="manual-section">
+            <h3>【重要】スマホのホーム画面にアイコンを追加してください</h3>
+            <p style="font-size: 14px; margin-bottom: 15px;">毎回QRコードを読み取る必要がなくなり、通常のアプリと同じように1タップで開けるようになります。</p>
+            
+            <strong style="color: #ea4335;">■ iPhone (Safari) の場合</strong>
+            <ol class="step-list">
+                <li>標準カメラでQRコードを読み取り、画面を開きます。</li>
+                <li>画面の一番下にある<strong>「共有ボタン（四角から上矢印が飛び出しているアイコン）」</strong>をタップします。</li>
+                <li>メニューの中に表示される<strong>「ホーム画面に追加」</strong>を選択します。</li>
+            </ol>
+
+            <strong style="color: #4285f4;">■ Android (Chrome) の場合</strong>
+            <ol class="step-list">
+                <li>カメラやQRリーダーで読み取り、Chromeブラウザで開きます。</li>
+                <li>画面の右右上にある<strong>「メニューボタン（縦に丸が3つ並んだ ︙ アイコン）」</strong>をタップします。</li>
+                <li>メニューの中に表示される<strong>「ホーム画面に追加」</strong>を選択します。</li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="btn-zone">
+        <button class="print-btn" onclick="window.print()">このページを印刷する</button>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+        import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+        
+        const firebaseConfig = {
+            apiKey: "AIzaSyA6_Wnmfgy28yfNo8E1ytbBwwTRrfL1zCs",
+            authDomain: "mouthpiece-greenpark.firebaseapp.com",
+            projectId: "mouthpiece-greenpark",
+            storageBucket: "mouthpiece-greenpark.firebasestorage.app",
+            messagingSenderId: "795688174725",
+            appId: "1:795688174725:web:a0958e30465e09e51495ec",
+            measurementId: "G-V8CC0XRT2T"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // URLの ?id=xxxx から患者IDを取得
+        const pId = new URLSearchParams(window.location.search).get('id');
+
+        async function initPage() {
+            if (!pId) {
+                document.getElementById('pName').innerText = "エラー: 患者IDがありません";
+                return;
+            }
+
+            try {
+                // 名前を取得
+                const snap = await getDoc(doc(db, "patients", pId));
+                if (snap.exists()) {
+                    document.getElementById('pName').innerText = snap.data().name + " 変更後";
+                } else {
+                    document.getElementById('pName').innerText = "未登録の患者様";
+                }
+
+                // ★重要: 本番公開後は、ここの「URL」をご自身のFirebase Hostingなどの本番URLに変更してください。
+                // 現状はデフォルトのFirebase Hosting用URLになるよう自動生成をセットしています。
+                const appUrl = `https://mouthpiece-greenpark.web.app/index.html?id=${pId}`;
+
+                // QRコードを生成して描画
+                new QRCode(document.getElementById("qrcode"), {
+                    text: appUrl,
+                    width: 200,
+                    height: 200,
+                    colorDark : "#000000",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H
+                });
+
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        initPage();
+    </script>
+</body>
+</html>
